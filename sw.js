@@ -1,10 +1,11 @@
-const CACHE = 'follow-list-manager-v5';
+const CACHE = 'follow-list-manager-v7';
 const APP_SHELL = [
   './',
   './index.html',
   './style.css',
   './manifest.webmanifest',
   './assets/icon.svg',
+  './assets/app-mark.svg',
   './js/utils.js',
   './js/db.js',
   './js/importer.js',

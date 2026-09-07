@@ -1145,3 +1145,353 @@ body.focus-list #btnFocusList{position:fixed;right:1rem;top:.5rem;z-index:30}
 @media (max-width: 600px) {
   .triage-actions .btn { flex: 1 1 45%; justify-content: center; }
 }
+
+
+/* ---------------------------------------------------------------------
+   Dark-mode layout switch + maximize escape hatch fixes
+   ------------------------------------------------------------------- */
+
+/* Buttons inside the layout switch previously relied on browser defaults.
+   On Android those defaults can render as bright white, even in dark mode. */
+.layout-switch .btn {
+  background: var(--surface-alt);
+  color: var(--ink-muted);
+  border: 1px solid transparent;
+}
+.layout-switch .btn:hover {
+  background: var(--surface-hover);
+  color: var(--ink);
+}
+.layout-switch .btn[aria-pressed="true"] {
+  background: var(--ink);
+  color: var(--bg);
+}
+[data-theme="dark"] .layout-switch .btn[aria-pressed="true"] {
+  background: var(--accent-followed);
+  color: #06231b;
+}
+
+/* Dedicated exit control lives outside the hidden header, so maximize mode
+   can always be exited on touch devices without relying on a page refresh. */
+.focus-list-exit[hidden] {
+  display: none !important;
+}
+.focus-list-exit {
+  position: fixed;
+  top: max(.75rem, env(safe-area-inset-top));
+  right: max(.75rem, env(safe-area-inset-right));
+  z-index: 1000;
+  box-shadow: var(--shadow-modal);
+}
+
+/* The original maximize button is inside .app-header, which is intentionally
+   hidden in focus mode. Do not try to position a child of a hidden parent. */
+body.focus-list #btnFocusList {
+  position: static;
+}
+
+/* Defensive theme inheritance for table/list surfaces. */
+.list-viewport,
+.table-wrap,
+.account-table,
+.account-table tbody,
+.account-table tr,
+.account-table td {
+  background-color: transparent;
+  color: var(--ink);
+}
+.account-table th {
+  background-color: var(--surface-alt);
+}
+
+
+/* ---------------------------------------------------------------------
+   2026 UI polish: stronger hierarchy, command palette, mobile ergonomics
+   ------------------------------------------------------------------- */
+
+.brand-lockup {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+.brand-mark {
+  flex: 0 0 auto;
+  border-radius: 10px;
+  box-shadow: 0 4px 14px rgba(22, 32, 42, 0.12);
+}
+.command-trigger {
+  gap: 0.5rem;
+}
+.command-trigger kbd,
+.search-field__hint {
+  background: var(--surface-alt);
+  color: var(--ink-faint);
+}
+.command-trigger kbd {
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font-family: var(--font-mono);
+  font-size: .68rem;
+  padding: .12rem .35rem;
+}
+.toolbar-primary {
+  box-shadow: 0 1px 0 var(--border);
+}
+.toolbar-secondary {
+  position: sticky;
+  top: 0;
+  z-index: 25;
+  padding: .6rem 0;
+  margin-top: -.35rem;
+  background: color-mix(in srgb, var(--bg) 90%, transparent);
+  backdrop-filter: blur(12px);
+}
+.filter-tabs {
+  padding: .15rem;
+  border-radius: 999px;
+  background: var(--surface-alt);
+  border: 1px solid var(--border);
+}
+.filter-tab {
+  border-color: transparent;
+}
+.filter-tab.is-active {
+  box-shadow: 0 1px 2px rgba(15, 25, 35, .08);
+}
+.search-field {
+  min-height: 42px;
+  border-radius: 12px;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.24);
+}
+.search-field:focus-within {
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--focus) 16%, transparent);
+}
+.stats-strip {
+  box-shadow: 0 1px 0 var(--border);
+}
+.stat-block {
+  padding: .2rem .35rem;
+  border-radius: 9px;
+}
+.stat-block:hover {
+  background: var(--surface-alt);
+}
+.list-header {
+  margin-top: .05rem;
+}
+.pagination {
+  padding-top: .25rem;
+}
+.pagination__info {
+  padding: .4rem .65rem;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  border-radius: 999px;
+}
+.empty-state {
+  min-height: 320px;
+}
+.account-row,
+.table-wrap {
+  transition: box-shadow var(--transition-fast), border-color var(--transition-fast), background-color var(--transition-fast);
+}
+.account-row:focus-within {
+  box-shadow: inset 0 0 0 1px var(--focus);
+}
+.account-row__actions .btn--primary {
+  box-shadow: 0 1px 2px rgba(0,0,0,.08);
+}
+.tag-chip {
+  background: color-mix(in srgb, var(--surface-alt) 85%, var(--accent-followed-bg));
+}
+.table-wrap {
+  border-radius: var(--radius-md);
+}
+.account-table thead th {
+  backdrop-filter: blur(8px);
+}
+
+/* Command palette */
+.command-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 900;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding: min(12vh, 6rem) 1rem 2rem;
+  background: rgba(5, 10, 14, .56);
+  backdrop-filter: blur(6px);
+}
+.command-palette {
+  width: min(650px, 100%);
+  max-height: min(72vh, 650px);
+  overflow: hidden;
+  background: var(--surface);
+  color: var(--ink);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  box-shadow: 0 28px 80px rgba(0,0,0,.32);
+}
+.command-palette__header {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  align-items: flex-start;
+  padding: 1rem 1rem .75rem;
+}
+.command-palette__eyebrow {
+  display: block;
+  color: var(--accent-followed);
+  text-transform: uppercase;
+  letter-spacing: .08em;
+  font-size: .68rem;
+  font-weight: 800;
+}
+.command-palette h2 {
+  margin-top: .2rem;
+  font-size: 1rem;
+}
+.command-search {
+  display: flex;
+  align-items: center;
+  gap: .55rem;
+  margin: 0 .8rem .65rem;
+  padding: .7rem .8rem;
+  border: 1px solid var(--border);
+  border-radius: 11px;
+  background: var(--surface-alt);
+  color: var(--ink-muted);
+}
+.command-search input {
+  border: 0;
+  outline: none;
+  flex: 1;
+  min-width: 0;
+  background: transparent;
+  color: var(--ink);
+}
+.command-list {
+  max-height: 48vh;
+  overflow: auto;
+  padding: .25rem .45rem .5rem;
+}
+.command-item {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: center;
+  gap: .75rem;
+  width: 100%;
+  padding: .75rem .7rem;
+  border: 0;
+  border-radius: 10px;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+}
+.command-item:hover,
+.command-item.is-active {
+  background: var(--surface-alt);
+}
+.command-item__icon {
+  display: grid;
+  place-items: center;
+  width: 2rem;
+  height: 2rem;
+  border-radius: 8px;
+  background: var(--accent-followed-bg);
+  color: var(--accent-followed);
+  font-size: .9rem;
+  font-weight: 800;
+}
+.command-item__title {
+  font-weight: 700;
+  font-size: .86rem;
+}
+.command-item__hint {
+  margin-top: .1rem;
+  color: var(--ink-muted);
+  font-size: .75rem;
+}
+.command-item kbd {
+  font-family: var(--font-mono);
+  font-size: .68rem;
+  color: var(--ink-faint);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: .12rem .34rem;
+}
+.command-palette__hint {
+  padding: .6rem .9rem .75rem;
+  margin: 0;
+  color: var(--ink-faint);
+  font-size: .7rem;
+  border-top: 1px solid var(--border);
+}
+
+@media (max-width: 760px) {
+  .app-header {
+    gap: .7rem;
+  }
+  .app-header__actions {
+    width: 100%;
+    overflow-x: auto;
+    padding-bottom: .15rem;
+    scrollbar-width: none;
+  }
+  .app-header__actions::-webkit-scrollbar { display:none; }
+  .command-trigger__label { display:none; }
+  .command-trigger kbd { display:none; }
+  .toolbar-primary {
+    padding: .6rem;
+  }
+  .toolbar-primary__group {
+    gap: .4rem;
+  }
+  .toolbar-secondary {
+    padding: .55rem 0;
+  }
+  .filter-tabs {
+    overflow-x: auto;
+    flex-wrap: nowrap;
+    scrollbar-width: none;
+  }
+  .filter-tabs::-webkit-scrollbar { display:none; }
+  .filter-tab {
+    flex: 0 0 auto;
+  }
+  .search-sort {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+  }
+  .search-field {
+    grid-column: 1 / -1;
+  }
+  .sort-field {
+    min-width: 0;
+  }
+  .sort-field select {
+    width: 100%;
+    min-width: 0;
+  }
+  .layout-switch {
+    grid-column: 1 / -1;
+  }
+  .command-backdrop {
+    align-items: flex-start;
+    padding: max(4vh, 1rem) .65rem 1rem;
+  }
+  .command-palette {
+    border-radius: 14px;
+  }
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .command-palette {
+    animation: command-in 140ms ease-out;
+  }
+  @keyframes command-in {
+    from { opacity: 0; transform: translateY(-8px) scale(.985); }
+    to { opacity: 1; transform: translateY(0) scale(1); }
+  }
+}

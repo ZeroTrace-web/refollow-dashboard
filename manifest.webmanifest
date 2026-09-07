@@ -8,7 +8,7 @@
   "description": "A local-first dashboard for organizing and tracking imported social-media profile links.",
   "icons": [
     {
-      "src": "assets/icon.svg",
+      "src": "assets/app-mark.svg",
       "sizes": "any",
       "type": "image/svg+xml",
       "purpose": "any maskable"

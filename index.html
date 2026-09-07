@@ -18,10 +18,19 @@
 
   <header class="app-header">
     <div class="app-header__title">
-      <h1>Follow List Manager</h1>
-      <p class="app-header__tagline">Work through your imported follow list, one profile at a time.</p>
+      <div class="brand-lockup">
+        <img class="brand-mark" src="assets/app-mark.svg" alt="" width="34" height="34">
+        <div>
+          <h1>Follow List Manager</h1>
+          <p class="app-header__tagline">Work through your imported follow list, one profile at a time.</p>
+        </div>
+      </div>
     </div>
     <div class="app-header__actions">
+      <button id="btnCommand" class="btn btn--ghost command-trigger" type="button" aria-haspopup="dialog" title="Open command palette">
+        <span class="command-trigger__label">Quick actions</span>
+        <kbd>Ctrl K</kbd>
+      </button>
       <button id="btnHistory" class="btn btn--ghost" type="button">History</button>
       <button id="btnSettings" class="btn btn--ghost" type="button">Settings</button>
       <button id="btnInstall" class="btn btn--ghost" type="button" hidden>Install</button>
@@ -39,6 +48,7 @@
       </button>
     </div>
   </header>
+  <button id="btnExitFocusList" class="focus-list-exit btn btn--primary" type="button" hidden aria-label="Exit maximize account list">Exit maximize</button>
 
   <section class="toolbar-primary" aria-label="Import and backup">
     <div class="toolbar-primary__group">
@@ -264,5 +274,23 @@
 <script src="js/render.js"></script>
 <script src="js/app.js"></script>
 <script>if("serviceWorker" in navigator){window.addEventListener("load",()=>navigator.serviceWorker.register("sw.js").catch(()=>{}));}</script>
+<div class="command-backdrop" id="commandBackdrop" hidden>
+  <div class="command-palette" role="dialog" aria-modal="true" aria-labelledby="commandTitle" id="commandPalette" tabindex="-1">
+    <div class="command-palette__header">
+      <div>
+        <span class="command-palette__eyebrow">Quick actions</span>
+        <h2 id="commandTitle">What do you want to do?</h2>
+      </div>
+      <button class="btn btn--icon" id="btnCloseCommand" type="button" aria-label="Close quick actions">×</button>
+    </div>
+    <label class="command-search">
+      <svg viewBox="0 0 20 20" width="16" height="16" aria-hidden="true"><circle cx="8.5" cy="8.5" r="5.5" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="m17 17-4-4" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
+      <input id="commandInput" type="search" placeholder="Type a command…" autocomplete="off" aria-label="Search commands">
+    </label>
+    <div class="command-list" id="commandList" role="listbox" aria-label="Commands"></div>
+    <p class="command-palette__hint">Use ↑ ↓ to move, Enter to run, Esc to close.</p>
+  </div>
+</div>
+
 </body>
 </html>
