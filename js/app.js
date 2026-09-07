@@ -35,9 +35,14 @@
   const selection = new Set();
 
   const state = {
+    autoMarkFollowedOnOpen: settings.get('autoMarkFollowedOnOpen', true) !== false,
     filter: settings.get('filter', 'all'),
     sort: settings.get('sort', 'newest'),
     view: settings.get('view', 'comfortable'),
+    layout: settings.get('layout', 'cards'),
+    tagFilter: settings.get('tagFilter', ''),
+    focusList: false,
+    lastOpenedId: null,
     search: '',
     currentPage: 1,
     pageSize: 50,
@@ -45,15 +50,20 @@
 
   // Old or malformed saved preferences should never be able to break rendering.
   const VALID_FILTERS = new Set(['all', 'not-followed', 'followed', 'skipped']);
-  const VALID_VIEWS = new Set(['comfortable', 'compact']);
+  const VALID_VIEWS = new Set(['compact', 'comfortable', 'large']);
+  const VALID_LAYOUTS = new Set(['cards', 'table']);
   const VALID_SORTS = new Set(['newest', 'oldest', 'name-asc', 'name-desc', 'updated']);
   if (!VALID_FILTERS.has(state.filter)) state.filter = 'all';
   if (!VALID_VIEWS.has(state.view)) state.view = 'comfortable';
+  if (!VALID_LAYOUTS.has(state.layout)) state.layout = 'cards';
+  if (typeof state.tagFilter !== 'string') state.tagFilter = '';
   if (!VALID_SORTS.has(state.sort)) state.sort = 'newest';
+  if (typeof state.autoMarkFollowedOnOpen !== 'boolean') state.autoMarkFollowedOnOpen = true;
 
   let visibleList = []; // accounts after filter + search + sort, in display order
   let pagedList = []; // current page of visible accounts
   let counts = { all: 0, 'not-followed': 0, followed: 0, skipped: 0 };
+  let deferredInstallPrompt = null;
 
   const SORTERS = {
     newest: (a, b) => b.createdAt - a.createdAt,
@@ -71,8 +81,14 @@
 
   const dom = {
     btnAbout: $('btnAbout'),
+    btnHistory: $('btnHistory'),
+    btnSettings: $('btnSettings'),
+    btnInstall: $('btnInstall'),
     btnAboutInline: $('btnAboutInline'),
     btnViewToggle: $('btnViewToggle'),
+    btnViewSmaller: $('btnViewSmaller'),
+    btnViewLarger: $('btnViewLarger'),
+    btnFocusList: $('btnFocusList'),
     btnTheme: $('btnTheme'),
     iconThemeSun: $('iconThemeSun'),
     iconThemeMoon: $('iconThemeMoon'),
@@ -80,7 +96,11 @@
     btnImportHtml: $('btnImportHtml'),
     fileImportHtml: $('fileImportHtml'),
     btnOpenNext: $('btnOpenNext'),
+     btnTriage: $('btnTriage'),
+     btnResume: $('btnResume'),
     btnExport: $('btnExport'),
+    btnExportCsv: $('btnExportCsv'),
+    btnExportHtml: $('btnExportHtml'),
     btnImportBackup: $('btnImportBackup'),
     fileImportBackup: $('fileImportBackup'),
     btnReset: $('btnReset'),
@@ -98,6 +118,9 @@
     countNotFollowed: $('countNotFollowed'),
     countFollowed: $('countFollowed'),
     countSkipped: $('countSkipped'),
+    tagFilter: $('tagFilter'),
+    btnLayoutCards: $('btnLayoutCards'),
+    btnLayoutTable: $('btnLayoutTable'),
 
     searchInput: $('searchInput'),
     sortSelect: $('sortSelect'),
@@ -105,6 +128,7 @@
     bulkBar: $('bulkBar'),
     bulkCount: $('bulkCount'),
     btnClearSelection: $('btnClearSelection'),
+    btnBulkTag: $('btnBulkTag'),
 
     selectAllVisible: $('selectAllVisible'),
     listHeaderHint: $('listHeaderHint'),
@@ -112,6 +136,8 @@
     listViewport: $('listViewport'),
     listSizer: $('listSizer'),
     listRows: $('listRows'),
+    tableWrap: $('tableWrap'),
+    tableRows: $('tableRows'),
     emptyState: $('emptyState'),
     emptyStateText: $('emptyStateText'),
     emptyStateAction: $('emptyStateAction'),
@@ -123,6 +149,7 @@
 
     importProgress: $('importProgress'),
     importProgressText: $('importProgressText'),
+     triageBackdrop: $('triageBackdrop'), triageTitle: $('triageTitle'), triageCounter: $('triageCounter'), triageName: $('triageName'), triageUrl: $('triageUrl'), triageStatus: $('triageStatus'), triageOpen: $('triageOpen'), triageFollow: $('triageFollow'), triageSkip: $('triageSkip'), triagePrev: $('triagePrev'), triageNext: $('triageNext'), triageClose: $('triageClose'),
   };
 
   function normalizeLoadedAccounts(loaded) {
@@ -154,6 +181,7 @@
         name: FLM.utils.sanitizeName(raw.name) || url.href,
         url: url.href,
         status,
+        tags: Array.isArray(raw.tags) ? [...new Set(raw.tags.map((t) => FLM.utils.sanitizeName(t)).filter(Boolean).slice(0, 20))] : [],
         createdAt,
         updatedAt,
       };
@@ -185,6 +213,7 @@
 
     let list = accounts;
     if (state.filter !== 'all') list = list.filter((a) => a.status === state.filter);
+    if (state.tagFilter) list = list.filter((a) => Array.isArray(a.tags) && a.tags.includes(state.tagFilter));
     if (state.search) {
       const q = state.search;
       list = list.filter((a) =>
@@ -218,6 +247,20 @@
     dom.progressBarFill.style.width = `${pct}%`;
     dom.progressBar.setAttribute('aria-valuenow', String(pct));
     dom.progressPct.textContent = `${pct}%`;
+  }
+
+  function renderTagFilter() {
+    const tags = [...new Set(accounts.flatMap((a) => Array.isArray(a.tags) ? a.tags : []))].sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }));
+    const current = state.tagFilter;
+    dom.tagFilter.replaceChildren();
+    const all = document.createElement('option');
+    all.value = ''; all.textContent = 'All tags'; dom.tagFilter.appendChild(all);
+    tags.forEach((tag) => {
+      const opt = document.createElement('option');
+      opt.value = tag; opt.textContent = tag; dom.tagFilter.appendChild(opt);
+    });
+    state.tagFilter = tags.includes(current) ? current : '';
+    dom.tagFilter.value = state.tagFilter;
   }
 
   function renderFilterCounts() {
@@ -281,24 +324,43 @@
 
   function renderRow(index, total) {
     const account = pagedList[index];
-    return render.createRowElement(account, { index, total, selected: selection.has(account.id) });
+    return render.createRowElement(account, { index, total, offset: (state.currentPage - 1) * state.pageSize, selected: selection.has(account.id) });
+  }
+  function renderTableRow(index, total) {
+    const account = pagedList[index];
+    return render.createTableElement(account, { index, total, selected: selection.has(account.id) });
   }
 
   let virtualList = null;
 
   function renderList() {
-    virtualList.refresh();
+    if (state.layout === 'table') {
+      dom.listRows.hidden = true;
+      dom.tableWrap.hidden = false;
+      dom.tableRows.replaceChildren(...pagedList.map((a, i) => renderTableRow(i, pagedList.length)));
+    } else {
+      dom.listRows.hidden = false;
+      dom.tableWrap.hidden = true;
+      virtualList.refresh();
+    }
   }
 
   function renderAll() {
     recomputeDerived();
     renderStats();
     renderFilterCounts();
+    renderTagFilter();
     renderEmptyState();
     renderSelectionUi();
     renderListMeta();
     renderOpenNextAvailability();
     renderList();
+  }
+
+  function renderResumeAvailability() {
+    const a = state.lastOpenedId ? accountsById.get(state.lastOpenedId) : null;
+    dom.btnResume.hidden = !a;
+    dom.btnResume.title = a ? `Resume ${a.name}` : 'No saved last-opened account';
   }
 
   function renderOpenNextAvailability() {
@@ -371,10 +433,9 @@
   /** Briefly highlights rows (if currently rendered) after a status change. */
   function flashRows(ids) {
     requestAnimationFrame(() => {
-      ids.forEach((id) => {
-        const selectorId = window.CSS && CSS.escape ? CSS.escape(id) : id;
-        const rowEl = dom.listRows.querySelector(`[data-id="${selectorId}"]`);
-        if (!rowEl) return;
+      const wanted = new Set(ids);
+      Array.from(dom.listRows.children).forEach((rowEl) => {
+        if (!wanted.has(rowEl.dataset.id)) return;
         rowEl.classList.add('just-changed');
         setTimeout(() => rowEl.classList.remove('just-changed'), 650);
       });
@@ -394,10 +455,11 @@
     const account = accountsById.get(id);
     if (!account) return;
     const wasAlreadyFollowed = account.status === 'followed';
+    saveLastOpened(id);
 
     // Open synchronously while this event still has a user-gesture context.
-    // The app's contract is that clicking Open marks the account followed even
-    // when the browser blocks the new tab.
+    // Whether opening also marks the account as followed is controlled by
+    // the user's local Settings preference.
     let win = null;
     try {
       win = window.open(account.url, '_blank');
@@ -408,7 +470,7 @@
       console.warn('[FLM] Profile window could not be opened:', err);
     }
 
-    if (!wasAlreadyFollowed) {
+    if (state.autoMarkFollowedOnOpen && !wasAlreadyFollowed) {
       const saved = await applyStatusChange(
         [id],
         'followed',
@@ -418,23 +480,35 @@
     }
 
     if (!win) {
+      const suffix = state.autoMarkFollowedOnOpen && !wasAlreadyFollowed ? ' Marked as followed.' : '';
       toast.show(
-        wasAlreadyFollowed
-          ? 'Profile is marked followed, but the browser blocked the new tab.'
-          : 'Marked as followed, but the browser blocked the new tab.',
+        `Profile could not be opened in a new tab.${suffix}`,
         { type: 'warning', duration: 5000 }
       );
-    } else if (wasAlreadyFollowed) {
+    } else if (state.autoMarkFollowedOnOpen && !wasAlreadyFollowed) {
+      toast.show('Profile opened and marked as followed.', { type: 'success', duration: 2500 });
+    } else {
       toast.show('Profile opened.', { type: 'info', duration: 2000 });
     }
   }
 
   async function openNextProfile() {
-    const queue = accounts.filter((a) => a.status === 'not-followed').sort(SORTERS[state.sort] || SORTERS.newest);
-    const next = queue[0];
-    if (!next) {
+    const ordered = accounts.slice().sort(SORTERS[state.sort] || SORTERS.newest);
+    const queue = ordered.filter((a) => a.status === 'not-followed');
+    if (!queue.length) {
       toast.show("You're all caught up — no not-followed accounts left.", { type: 'info' });
       return;
+    }
+
+    let next = queue[0];
+    if (!state.autoMarkFollowedOnOpen && state.lastOpenedId) {
+      const lastIndex = ordered.findIndex((a) => a.id === state.lastOpenedId);
+      if (lastIndex >= 0) {
+        next =
+          ordered.slice(lastIndex + 1).find((a) => a.status === 'not-followed') ||
+          ordered.slice(0, lastIndex).find((a) => a.status === 'not-followed') ||
+          queue[0];
+      }
     }
     await openProfileAndMarkFollowed(next.id);
   }
@@ -467,7 +541,6 @@
 
     dom.importProgressText.textContent = 'Saving profile links…';
     await nextPaint();
-    dom.importProgress.hidden = true;
 
     const result = parsed.result;
     if (!result || result.accountsToAdd.length === 0) {
@@ -484,6 +557,8 @@
       console.error('[FLM] Failed to save imported accounts:', err);
       toast.show("Couldn't save the imported accounts — your browser storage may be full.", { type: 'error' });
       return;
+    } finally {
+      dom.importProgress.hidden = true;
     }
 
     for (const acc of result.accountsToAdd) {
@@ -498,6 +573,9 @@
     const parts = [`Imported ${formatNumber(result.accountsToAdd.length)} new profile links.`];
     if (result.duplicateCount > 0) parts.push(`${formatNumber(result.duplicateCount)} duplicates were ignored.`);
     if (result.invalidCount > 0) parts.push(`${formatNumber(result.invalidCount)} invalid links were skipped.`);
+    try {
+      await db.addHistory({ kind: 'import', files: [file.name], added: result.accountsToAdd.length, duplicates: result.duplicateCount || 0, invalid: result.invalidCount || 0, totalAfter: accounts.length, urls: result.accountsToAdd.map((a) => normalizeUrlKey(a.url)).slice(0, 50000) });
+    } catch (err) { console.warn('[FLM] Could not record import history:', err); }
     toast.show(parts.join(' '), { type: 'success' });
   }
 
@@ -548,7 +626,43 @@
     const parts = [`Restored ${formatNumber(result.accountsToAdd.length)} accounts.`];
     if (result.duplicateCount) parts.push(`${formatNumber(result.duplicateCount)} duplicates were skipped.`);
     if (result.invalidCount) parts.push(`${formatNumber(result.invalidCount)} entries were invalid and skipped.`);
-    toast.show(parts.join(' '), { type: 'success' });
+    try { await db.addHistory({ kind: 'restore', files: [file.name], added: result.accountsToAdd.length, duplicates: result.duplicateCount || 0, invalid: result.invalidCount || 0, totalAfter: accounts.length, urls: result.accountsToAdd.map((a) => normalizeUrlKey(a.url)).slice(0, 50000) }); } catch (err) { console.warn('[FLM] Could not record restore history:', err); }
+     toast.show(parts.join(' '), { type: 'success' });
+  }
+
+
+  function csvCell(value) {
+    const s = String(value ?? '');
+    return `"${s.replace(/"/g, '""')}"`;
+  }
+  function handleExportCsv() {
+    if (!accounts.length) { toast.show('There is nothing to export yet.', { type: 'info' }); return; }
+    const lines = [['Name', 'URL', 'Status', 'Tags', 'Created', 'Updated'].map(csvCell).join(',')];
+    accounts.forEach((a) => lines.push([
+      a.name, a.url, a.status, (a.tags || []).join('; '),
+      new Date(a.createdAt).toISOString(), new Date(a.updatedAt).toISOString()
+    ].map(csvCell).join(',')));
+    const blob = new Blob([lines.join('\\r\\n')], { type: 'text/csv;charset=utf-8' });
+    const url = URL.createObjectURL(blob); const link = document.createElement('a');
+    link.href = url; link.download = `follow-list-${formatDateForFilename(new Date())}.csv`;
+    document.body.appendChild(link); link.click(); link.remove(); setTimeout(() => URL.revokeObjectURL(url), 1000);
+    toast.show('CSV exported successfully.', { type: 'success' });
+  }
+
+  function handleExportHtml() {
+    if (!accounts.length) { toast.show('There is nothing to export yet.', { type: 'info' }); return; }
+    const rows = accounts.map((a) =>
+      `<tr><td>${escapeHtml(a.name)}</td><td><a href="${escapeHtml(a.url)}">${escapeHtml(a.url)}</a></td><td>${escapeHtml(STATUS_LABELS[a.status] || a.status)}</td><td>${(a.tags || []).map(escapeHtml).join(', ')}</td></tr>`
+    ).join('');
+    const doc = `<!doctype html><html><head><meta charset="utf-8"><title>Follow List Report</title><style>body{font:14px system-ui;padding:24px}table{border-collapse:collapse;width:100%}th,td{padding:8px;border:1px solid #ddd;text-align:left}th{background:#f3f4f6}</style></head><body><h1>Follow List Report</h1><p>Generated ${new Date().toLocaleString()}</p><table><thead><tr><th>Name</th><th>URL</th><th>Status</th><th>Tags</th></tr></thead><tbody>${rows}</tbody></table></body></html>`;
+    const blob = new Blob([doc], { type: 'text/html;charset=utf-8' });
+    const url = URL.createObjectURL(blob); const link = document.createElement('a');
+    link.href = url; link.download = `follow-list-report-${formatDateForFilename(new Date())}.html`;
+    document.body.appendChild(link); link.click(); link.remove(); setTimeout(() => URL.revokeObjectURL(url), 1000);
+    toast.show('HTML report exported.', { type: 'success' });
+  }
+  function escapeHtml(value) {
+    return String(value ?? '').replace(/[&<>"']/g, (c) => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;', "'":'&#39;'}[c]));
   }
 
   /* ----------------------------------------------------------------------
@@ -570,6 +684,7 @@
         name: a.name,
         url: a.url,
         status: a.status,
+        tags: Array.isArray(a.tags) ? [...a.tags] : [],
         createdAt: a.createdAt,
         updatedAt: a.updatedAt,
       })),
@@ -604,6 +719,7 @@
           onClick: async () => {
             try {
               await db.clear();
+              if (typeof db.clearHistory === 'function') await db.clearHistory();
             } catch (err) {
               console.error('[FLM] Reset failed:', err);
               toast.show("Couldn't clear saved data.", { type: 'error' });
@@ -639,11 +755,76 @@
         }),
         el('p', { text: storageLine + ' Clearing this browser\u2019s site data for this page will erase it, so export a backup if you want a copy you can keep.' }),
         el('p', {
-          text: 'Clicking "Open Profile" opens the link in a new tab and immediately marks that account as followed. This app has no way to see or confirm what happens on the other site — it only tracks what you\u2019ve told it.',
+          text: 'Clicking "Open Profile" opens the link in a new tab. When Auto-Mark is enabled it also marks the account as followed; when Auto-Mark is disabled, the status stays unchanged until you update it manually. This app cannot see or confirm what happens on the other site.',
         }),
       ],
       actions: [{ label: 'Got it', variant: 'primary', autofocus: true }],
     });
+  }
+
+  function openSettingsModal() {
+    const checkbox = document.createElement('input');
+    checkbox.type = 'checkbox';
+    checkbox.checked = state.autoMarkFollowedOnOpen;
+    checkbox.id = 'autoMarkFollowedOnOpen';
+    checkbox.setAttribute('aria-describedby', 'autoMarkFollowedOnOpenHint');
+
+    const option = document.createElement('div');
+    option.className = 'settings-option';
+    option.appendChild(checkbox);
+
+    const copy = document.createElement('div');
+    copy.className = 'settings-option__copy';
+
+    const title = document.createElement('span');
+    title.className = 'settings-option__title';
+    title.textContent = 'Automatically mark as Followed when opening a profile';
+
+    const hint = document.createElement('span');
+    hint.className = 'settings-option__hint';
+    hint.id = 'autoMarkFollowedOnOpenHint';
+    hint.textContent = 'When enabled, Open Profile marks the account as Followed immediately. When disabled, opening a profile only opens the link and leaves its status unchanged.';
+
+    copy.append(title, hint);
+    option.appendChild(copy);
+
+    const note = el('p', {
+      text: 'This only controls the local tracker. The app cannot verify what happens on the external social-media site.',
+    });
+    note.className = 'settings-option__hint';
+
+    modal.open({
+      title: 'Settings',
+      bodyNodes: [option, note],
+      actions: [{ label: 'Done', variant: 'primary', autofocus: true }],
+    });
+
+    checkbox.addEventListener('change', () => {
+      state.autoMarkFollowedOnOpen = checkbox.checked;
+      settings.set('autoMarkFollowedOnOpen', state.autoMarkFollowedOnOpen);
+      toast.show(
+        state.autoMarkFollowedOnOpen
+          ? 'Open Profile will now mark accounts as followed.'
+          : 'Open Profile will no longer change account status.',
+        { type: 'success', duration: 2500 }
+      );
+    });
+
+    setTimeout(() => checkbox.focus(), 0);
+  }
+
+  function applyLayout(layout) {
+    state.layout = VALID_LAYOUTS.has(layout) ? layout : 'cards';
+    document.documentElement.setAttribute('data-layout', state.layout);
+    dom.btnLayoutCards.setAttribute('aria-pressed', state.layout === 'cards' ? 'true' : 'false');
+    dom.btnLayoutTable.setAttribute('aria-pressed', state.layout === 'table' ? 'true' : 'false');
+    settings.set('layout', state.layout);
+    renderList();
+  }
+  function setLayout(layout) {
+    if (!VALID_LAYOUTS.has(layout)) return;
+    state.layout = layout;
+    applyLayout(layout);
   }
 
   /* ----------------------------------------------------------------------
@@ -675,15 +856,267 @@
 
   function applyView(view) {
     document.documentElement.setAttribute('data-view', view);
-    dom.btnViewToggle.setAttribute('aria-pressed', view === 'compact' ? 'true' : 'false');
-    dom.btnViewToggle.title = view === 'compact' ? 'Switch to comfortable view' : 'Switch to compact view';
+    const labels = { compact: 'Compact', comfortable: 'Normal', large: 'Large' };
+    dom.btnViewToggle.textContent = labels[view] || 'Normal';
+    dom.btnViewToggle.setAttribute('aria-pressed', view === 'large' ? 'true' : 'false');
+    dom.btnViewToggle.title = `Account size: ${labels[view] || 'Normal'}`;
+  }
+
+  function setView(view) {
+    if (!VALID_VIEWS.has(view)) return;
+    state.view = view;
+    applyView(view);
+    settings.set('view', view);
+    if (typeof virtualList !== 'undefined' && virtualList && virtualList.setView) virtualList.setView(view);
+    renderAll();
   }
 
   function toggleView() {
-    state.view = state.view === 'compact' ? 'comfortable' : 'compact';
-    applyView(state.view);
-    settings.set('view', state.view);
-    virtualList.setView(state.view);
+    const order = ['compact', 'comfortable', 'large'];
+    setView(order[(order.indexOf(state.view) + 1) % order.length]);
+  }
+
+  function changeView(delta) {
+    const order = ['compact', 'comfortable', 'large'];
+    const index = Math.max(0, Math.min(order.length - 1, order.indexOf(state.view) + delta));
+    setView(order[index]);
+  }
+
+  function toggleFocusList() {
+    state.focusList = !state.focusList;
+    document.body.classList.toggle('focus-list', state.focusList);
+    dom.btnFocusList.setAttribute('aria-pressed', state.focusList ? 'true' : 'false');
+    dom.btnFocusList.title = state.focusList ? 'Exit maximize account list' : 'Maximize account list';
+    if (state.focusList) {
+      try { dom.listViewport.focus({ preventScroll: true }); }
+      catch (_err) { dom.btnFocusList.focus(); }
+    }
+  }
+
+
+  function normalizeTags(input) {
+    return [...new Set(String(input || '').split(',').map((t) => FLM.utils.sanitizeName(t).replace(/^#/, '').trim()).filter(Boolean))].slice(0, 20);
+  }
+
+  async function editTags(id) {
+    const account = accountsById.get(id);
+    if (!account) return;
+    const input = document.createElement('input');
+    input.type = 'text';
+    input.className = 'modal-input';
+    input.value = (account.tags || []).join(', ');
+    input.placeholder = 'e.g. friends, creators, gaming';
+    input.setAttribute('aria-label', 'Comma-separated tags');
+    modal.open({
+      title: `Tags for ${account.name}`,
+      bodyNodes: [
+        el('p', { text: 'Add comma-separated tags. Keep them short so they remain useful as filters.' }),
+        input,
+      ],
+      actions: [
+        { label: 'Cancel', variant: 'secondary', autofocus: true },
+        {
+          label: 'Save tags',
+          variant: 'primary',
+          onClick: async () => {
+            const updated = { ...account, tags: normalizeTags(input.value), updatedAt: Date.now() };
+            try {
+              await db.put(updated);
+              Object.assign(account, updated);
+              renderAll();
+              toast.show('Tags saved.', { type: 'success', duration: 2000 });
+            } catch (err) {
+              console.error('[FLM] Tag save failed:', err);
+              toast.show("Couldn't save tags.", { type: 'error' });
+            }
+          },
+        },
+      ],
+    });
+    setTimeout(() => input.focus(), 0);
+  }
+
+  async function bulkAddTag() {
+    const ids = Array.from(selection);
+    if (!ids.length) return;
+    const input = document.createElement('input');
+    input.type = 'text';
+    input.className = 'modal-input';
+    input.placeholder = 'Tag to add, e.g. later';
+    input.setAttribute('aria-label', 'Tag to add');
+    modal.open({
+      title: `Add tag to ${formatNumber(ids.length)} accounts`,
+      bodyNodes: [el('p', { text: 'Enter one tag. It will be added without removing existing tags.' }), input],
+      actions: [
+        { label: 'Cancel', variant: 'secondary', autofocus: true },
+        {
+          label: 'Add tag',
+          variant: 'primary',
+          onClick: async () => {
+            const tag = normalizeTags(input.value)[0];
+            if (!tag) { toast.show('Enter a tag first.', { type: 'warning' }); return; }
+            const now = Date.now();
+            const updates = ids.map((id) => accountsById.get(id)).filter(Boolean).map((a) => ({
+              ...a, tags: [...new Set([...(a.tags || []), tag])].slice(0, 20), updatedAt: now
+            }));
+            try {
+              await db.putMany(updates);
+              updates.forEach((u) => Object.assign(accountsById.get(u.id), u));
+              selection.clear();
+              renderAll();
+              toast.show(`Added "${tag}" to ${formatNumber(updates.length)} accounts.`, { type: 'success' });
+            } catch (err) {
+              console.error('[FLM] Bulk tag save failed:', err);
+              toast.show("Couldn't save tags.", { type: 'error' });
+            }
+          },
+        },
+      ],
+    });
+    setTimeout(() => input.focus(), 0);
+  }
+
+  async function openHistoryModal() {
+    try {
+      const history = await db.getHistory();
+      const body = document.createElement('div');
+      body.className = 'history-list';
+      if (!history.length) {
+        body.appendChild(el('p', { text: 'No imports or restores have been recorded yet.' }));
+      } else {
+        if (history.length >= 2) {
+          const compare = document.createElement('button');
+          compare.type = 'button';
+          compare.className = 'btn btn--secondary btn--small';
+          compare.textContent = 'Compare latest two import additions';
+          compare.addEventListener('click', () => {
+            const a = history[0], b = history[1];
+            const first = new Set(Array.isArray(a.urls) ? a.urls : []);
+            const second = new Set(Array.isArray(b.urls) ? b.urls : []);
+            let added = 0, removed = 0, same = 0;
+            for (const u of first) first.has(u) && second.has(u) && same++;
+            for (const u of first) if (!second.has(u)) added++;
+            for (const u of second) if (!first.has(u)) removed++;
+            modal.open({
+              title: 'Latest import additions comparison',
+              bodyNodes: [
+                el('p', { text: `${a.files?.join(', ') || 'Latest import'} compared with ${b.files?.join(', ') || 'Previous import'} based on URLs added by those import events.` }),
+                el('p', { text: `Among the URLs added by these events: ${formatNumber(added)} appear only in the latest event, ${formatNumber(same)} appear in both events, and ${formatNumber(removed)} appear only in the previous event.` }),
+              ],
+              actions: [{ label: 'Close', variant: 'primary', autofocus: true }],
+            });
+          });
+          body.appendChild(compare);
+        }
+        history.slice(0, 20).forEach((item) => {
+          const row = document.createElement('div');
+          row.className = 'history-item';
+          const title = item.kind === 'restore' ? 'Restored backup' : 'Imported file';
+          row.appendChild(el('strong', { text: title }));
+          const files = Array.isArray(item.files) ? item.files.join(', ') : 'Local file';
+          row.appendChild(el('span', { text: `${files} • +${formatNumber(item.added || 0)} • ${formatNumber(item.totalAfter || 0)} total • ${new Date(item.at || Date.now()).toLocaleString()}` }));
+          body.appendChild(row);
+        });
+      }
+      modal.open({
+        title: 'Import history',
+        bodyNodes: [body],
+        actions: [
+          { label: 'Close', variant: 'primary', autofocus: true },
+          { label: 'Clear history', variant: 'danger', onClick: async () => {
+            try {
+              await db.clearHistory();
+              modal.close();
+              toast.show('History cleared.', { type: 'success' });
+            } catch (err) {
+              toast.show("Couldn't clear history.", { type: 'error' });
+            }
+          }},
+        ],
+      });
+    } catch (err) {
+      console.error('[FLM] History read failed:', err);
+      toast.show("Couldn't read import history.", { type: 'error' });
+    }
+  }
+
+
+  function getTriageAccounts() {
+    return accounts
+      .filter((a) => a.status === 'not-followed')
+      .slice()
+      .sort(SORTERS[state.sort] || SORTERS.newest);
+  }
+
+  function renderTriage() {
+    const list = getTriageAccounts();
+    if (!list.length) {
+      dom.triageCounter.textContent = 'No not-followed accounts remain.';
+      dom.triageName.textContent = 'You are all caught up.';
+      dom.triageUrl.textContent = '';
+      dom.triageUrl.removeAttribute('href');
+      dom.triageStatus.hidden = true;
+      dom.triageOpen.disabled = true;
+      dom.triageFollow.disabled = true;
+      dom.triageSkip.disabled = true;
+      dom.triagePrev.disabled = true;
+      dom.triageNext.disabled = true;
+      return;
+    }
+    state.triageIndex = Math.max(0, Math.min(state.triageIndex, list.length - 1));
+    const a = list[state.triageIndex];
+    dom.triageCounter.textContent = `${formatNumber(state.triageIndex + 1)} of ${formatNumber(list.length)} not-followed accounts`;
+    dom.triageName.textContent = a.name;
+    dom.triageUrl.textContent = a.url;
+    dom.triageUrl.href = a.url;
+    dom.triageStatus.hidden = false;
+    dom.triageStatus.textContent = STATUS_LABELS[a.status] || a.status;
+    dom.triageOpen.disabled = false;
+    dom.triageFollow.disabled = false;
+    dom.triageSkip.disabled = false;
+    dom.triagePrev.disabled = state.triageIndex <= 0;
+    dom.triageNext.disabled = state.triageIndex >= list.length - 1;
+  }
+
+  function openTriage() {
+    state.triageOpen = true;
+    state.triageIndex = 0;
+    dom.triageBackdrop.hidden = false;
+    renderTriage();
+    setTimeout(() => dom.triageOpen.focus(), 0);
+  }
+  function closeTriage() {
+    state.triageOpen = false;
+    dom.triageBackdrop.hidden = true;
+    dom.btnTriage.focus();
+  }
+  async function triageAction(action) {
+    const list = getTriageAccounts();
+    if (!list.length) return;
+    const a = list[state.triageIndex];
+    if (!a) return;
+    if (action === 'open') {
+      await openProfileAndMarkFollowed(a.id);
+    } else if (action === 'follow') {
+      await applyStatusChange([a.id], 'followed', { message: 'Marked as followed.' });
+    } else if (action === 'skip') {
+      await applyStatusChange([a.id], 'skipped', { message: 'Account skipped.' });
+    }
+    const fresh = getTriageAccounts();
+    if (state.triageIndex >= fresh.length) state.triageIndex = Math.max(0, fresh.length - 1);
+    renderTriage();
+  }
+
+  function resumeLastOpened() {
+    const a = state.lastOpenedId ? accountsById.get(state.lastOpenedId) : null;
+    if (!a) { toast.show('No saved last-opened account is available.', { type: 'info' }); return; }
+    openProfileAndMarkFollowed(a.id);
+  }
+
+  function saveLastOpened(id) {
+    state.lastOpenedId = id;
+    settings.set('lastOpenedId', id);
+    settings.set('lastOpenedAt', Date.now());
   }
 
   /* ----------------------------------------------------------------------
@@ -691,10 +1124,44 @@
    * -------------------------------------------------------------------- */
 
   function wireEvents() {
+    window.addEventListener('beforeinstallprompt', (event) => {
+      event.preventDefault();
+      deferredInstallPrompt = event;
+      dom.btnInstall.hidden = false;
+    });
+    window.addEventListener('appinstalled', () => {
+      deferredInstallPrompt = null;
+      dom.btnInstall.hidden = true;
+      toast.show('App installed.', { type: 'success', duration: 2500 });
+    });
+    dom.btnInstall.addEventListener('click', async () => {
+      if (!deferredInstallPrompt) return;
+      try {
+        await deferredInstallPrompt.prompt();
+        await deferredInstallPrompt.userChoice;
+      } catch (_err) {}
+      deferredInstallPrompt = null;
+      dom.btnInstall.hidden = true;
+    });
     dom.btnAbout.addEventListener('click', openAboutModal);
+    dom.btnHistory.addEventListener('click', openHistoryModal);
+    dom.btnSettings.addEventListener('click', openSettingsModal);
     dom.btnAboutInline.addEventListener('click', openAboutModal);
     dom.btnTheme.addEventListener('click', toggleTheme);
     dom.btnViewToggle.addEventListener('click', toggleView);
+    dom.btnViewSmaller.addEventListener('click', () => changeView(-1));
+    dom.btnViewLarger.addEventListener('click', () => changeView(1));
+    dom.btnFocusList.addEventListener('click', toggleFocusList);
+    dom.btnLayoutCards.addEventListener('click', () => setLayout('cards'));
+    dom.btnLayoutTable.addEventListener('click', () => setLayout('table'));
+    dom.tagFilter.addEventListener('change', (e) => {
+      state.tagFilter = e.target.value;
+      state.currentPage = 1;
+      selection.clear();
+      settings.set('tagFilter', state.tagFilter);
+      renderAll();
+    });
+    dom.btnBulkTag.addEventListener('click', bulkAddTag);
 
     dom.btnImportHtml.addEventListener('click', () => dom.fileImportHtml.click());
     dom.fileImportHtml.addEventListener('change', async (e) => {
@@ -714,8 +1181,19 @@
     });
 
     dom.btnExport.addEventListener('click', handleExport);
+    dom.btnExportCsv.addEventListener('click', handleExportCsv);
+    dom.btnExportHtml.addEventListener('click', handleExportHtml);
     dom.btnReset.addEventListener('click', handleReset);
     dom.btnOpenNext.addEventListener('click', openNextProfile);
+     dom.btnTriage.addEventListener('click', openTriage);
+     dom.btnResume.addEventListener('click', resumeLastOpened);
+     dom.triageClose.addEventListener('click', closeTriage);
+     dom.triageOpen.addEventListener('click', () => triageAction('open'));
+     dom.triageFollow.addEventListener('click', () => triageAction('follow'));
+     dom.triageSkip.addEventListener('click', () => triageAction('skip'));
+     dom.triagePrev.addEventListener('click', () => { state.triageIndex--; renderTriage(); });
+     dom.triageNext.addEventListener('click', () => { state.triageIndex++; renderTriage(); });
+     dom.triageBackdrop.addEventListener('click', (e) => { if (e.target === dom.triageBackdrop) closeTriage(); });
 
     dom.filterTabs.addEventListener('click', (e) => {
       const tab = e.target.closest('[data-filter]');
@@ -800,6 +1278,8 @@
         applyStatusChange([id], 'skipped');
       } else if (action === 'mark-not-followed') {
         applyStatusChange([id], 'not-followed');
+      } else if (action === 'tags') {
+        editTags(id);
       } else if (action === 'copy') {
         copyAccountLink(id);
       }
@@ -814,12 +1294,37 @@
       renderSelectionUi();
     });
 
+    dom.tableRows.addEventListener('click', (e) => {
+      const btn = e.target.closest('[data-action]');
+      if (!btn) return;
+      const { action, id } = btn.dataset;
+      if (action === 'open') openProfileAndMarkFollowed(id);
+      else if (action === 'mark-followed') applyStatusChange([id], 'followed');
+      else if (action === 'mark-skipped') applyStatusChange([id], 'skipped');
+      else if (action === 'mark-not-followed') applyStatusChange([id], 'not-followed');
+      else if (action === 'tags') editTags(id);
+      else if (action === 'copy') copyAccountLink(id);
+    });
+    dom.tableRows.addEventListener('change', (e) => {
+      const checkbox = e.target.closest('[data-select-id]');
+      if (!checkbox) return;
+      const id = checkbox.dataset.selectId;
+      if (checkbox.checked) selection.add(id); else selection.delete(id);
+      renderSelectionUi();
+    });
+
     window.addEventListener('resize', debounce(() => virtualList.onResize(), 100));
 
     window.addEventListener('keydown', (e) => {
       const tag = (document.activeElement && document.activeElement.tagName) || '';
       const typing = tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT';
 
+      if (state.triageOpen) {
+        if (e.key === 'Escape') { closeTriage(); return; }
+        if (!typing && e.key === 'ArrowLeft') { e.preventDefault(); dom.triagePrev.click(); return; }
+        if (!typing && e.key === 'ArrowRight') { e.preventDefault(); dom.triageNext.click(); return; }
+        return;
+      }
       if (e.key === 'Escape' && document.activeElement === dom.searchInput && dom.searchInput.value) {
         dom.searchInput.value = '';
         state.search = '';
@@ -836,6 +1341,12 @@
       } else if (e.key === 'n' || e.key === 'N') {
         e.preventDefault();
         openNextProfile();
+      } else if (e.key === 'p' || e.key === 'P') {
+        e.preventDefault();
+        if (state.currentPage > 1) { state.currentPage -= 1; dom.listViewport.scrollTop = 0; renderAll(); }
+      } else if (e.key === 'j' || e.key === 'J') {
+        e.preventDefault();
+        if (state.currentPage < Math.ceil(visibleList.length / state.pageSize)) { state.currentPage += 1; dom.listViewport.scrollTop = 0; renderAll(); }
       }
     });
   }
@@ -904,6 +1415,8 @@
       // Startup must continue even if browser storage is unavailable.
     }
 
+    state.lastOpenedId = settings.get('lastOpenedId', null);
+
     if (storageWarning) {
       toast.show(storageWarning, { type: 'warning', duration: 8000 });
     }
@@ -916,8 +1429,19 @@
       getCount: () => pagedList.length,
       renderRow,
     });
+    applyLayout(state.layout);
 
-    dom.listFootnote.textContent = 'Tip: press / to search, Esc to clear it, and N to open the next profile.';
+    const lastOpenedAt = settings.get('lastOpenedAt', null);
+    if (state.lastOpenedId && lastOpenedAt) {
+      const last = accountsById.get(state.lastOpenedId);
+      if (last) {
+        dom.listFootnote.textContent = `Last opened: ${last.name} • ${new Date(lastOpenedAt).toLocaleString()} • Tip: / searches, N opens next, P/J change pages.`;
+      } else {
+        dom.listFootnote.textContent = 'Tip: / searches, N opens next, P/J change pages.';
+      }
+    } else {
+      dom.listFootnote.textContent = 'Tip: / searches, N opens next, P/J change pages.';
+    }
 
     wireEvents();
     renderAll();

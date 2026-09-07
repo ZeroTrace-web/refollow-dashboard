@@ -74,6 +74,7 @@
         name: nameFromUrl(url.href),
         url: url.href,
         status: 'not-followed',
+        tags: [],
         createdAt: now + accountsToAdd.length,
         updatedAt: now + accountsToAdd.length,
       });
@@ -119,6 +120,7 @@
         name,
         url: url.href,
         status: 'not-followed',
+        tags: [],
         createdAt: now + accountsToAdd.length,
         updatedAt: now + accountsToAdd.length,
       });
@@ -243,6 +245,7 @@
         name: sanitizeName(entry.name) || deriveNameFromUrl(url),
         url: url.href,
         status: VALID_STATUSES.has(entry.status) ? entry.status : 'not-followed',
+        tags: Array.isArray(entry.tags) ? [...new Set(entry.tags.map((t) => sanitizeName(t).replace(/^#/, '')).filter(Boolean).slice(0, 20))] : [],
         createdAt: Number.isFinite(entry.createdAt) ? entry.createdAt : now + accountsToAdd.length,
         updatedAt: Number.isFinite(entry.updatedAt) ? entry.updatedAt : now + accountsToAdd.length,
       });
