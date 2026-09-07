@@ -237,3 +237,24 @@ interfere with search text or your imported data.
 - Name/URL search does not search inside the (undisplayed) internal ID
   or timestamps — just the visible name and link, matching what you can
   see on screen.
+
+
+## Reliability notes
+
+The app uses IndexedDB as its primary account store and localStorage only as a fallback when IndexedDB cannot be initialized. Individual IndexedDB write/clear failures are retried rather than silently switching storage backends, which prevents split-brain data.
+
+The app does not show a startup loading overlay. The main interface renders immediately and local storage is loaded as part of initialization.
+
+Clicking **Open Profile** opens the profile in a new tab and marks that account as **Followed**. If the browser blocks the new tab, the account is still marked followed and the app shows a warning.
+
+
+## Importing files
+
+The main **Import files / following list** action accepts multiple local files at once. It supports HTML/XHTML, plain text, CSV/TSV, Markdown, RTF, XML, JSON backups, and common ZIP-based office/document formats such as DOCX, ODT, XLSX, XLSM, PPTX, and EPUB. For other files, the app makes a best-effort scan for literal `http://` and `https://` URLs (which can help with some legacy/binary documents).
+
+All parsing happens in the browser. Files are not uploaded. For document formats whose contents are compressed/encrypted or whose URLs are not stored as plain link strings, extraction may be incomplete.
+
+
+### Import safety and compatibility
+
+Imports are processed entirely in the browser. Files larger than 100 MB are rejected to prevent accidental browser freezes. The importer uses format-specific parsing where practical and falls back to literal URL recovery for difficult or legacy document formats.
