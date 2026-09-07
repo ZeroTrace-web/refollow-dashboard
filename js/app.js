@@ -39,9 +39,20 @@
     sort: settings.get('sort', 'newest'),
     view: settings.get('view', 'comfortable'),
     search: '',
+    currentPage: 1,
+    pageSize: 50,
   };
 
+  // Old or malformed saved preferences should never be able to break rendering.
+  const VALID_FILTERS = new Set(['all', 'not-followed', 'followed', 'skipped']);
+  const VALID_VIEWS = new Set(['comfortable', 'compact']);
+  const VALID_SORTS = new Set(['newest', 'oldest', 'name-asc', 'name-desc', 'updated']);
+  if (!VALID_FILTERS.has(state.filter)) state.filter = 'all';
+  if (!VALID_VIEWS.has(state.view)) state.view = 'comfortable';
+  if (!VALID_SORTS.has(state.sort)) state.sort = 'newest';
+
   let visibleList = []; // accounts after filter + search + sort, in display order
+  let pagedList = []; // current page of visible accounts
   let counts = { all: 0, 'not-followed': 0, followed: 0, skipped: 0 };
 
   const SORTERS = {
@@ -105,11 +116,62 @@
     emptyStateText: $('emptyStateText'),
     emptyStateAction: $('emptyStateAction'),
     listFootnote: $('listFootnote'),
+    pagination: $('pagination'),
+    btnPrevPage: $('btnPrevPage'),
+    btnNextPage: $('btnNextPage'),
+    pageInfo: $('pageInfo'),
 
-    loadingOverlay: $('loadingOverlay'),
     importProgress: $('importProgress'),
     importProgressText: $('importProgressText'),
   };
+
+  function normalizeLoadedAccounts(loaded) {
+    const now = Date.now();
+    const byUrl = new Map();
+
+    if (!Array.isArray(loaded)) return [];
+
+    for (const raw of loaded) {
+      if (!raw || typeof raw !== 'object') continue;
+
+      let url;
+      try {
+        url = new URL(String(raw.url || ''));
+      } catch (_err) {
+        continue;
+      }
+      if (url.protocol !== 'http:' && url.protocol !== 'https:') continue;
+
+      const status = VALID_FILTERS.has(raw.status) && raw.status !== 'all'
+        ? raw.status
+        : 'not-followed';
+      const createdAt = Number.isFinite(raw.createdAt) ? raw.createdAt : now;
+      const updatedAt = Number.isFinite(raw.updatedAt) ? raw.updatedAt : createdAt;
+      const id = String(raw.id || '').trim() || FLM.utils.generateId();
+
+      const account = {
+        id,
+        name: FLM.utils.sanitizeName(raw.name) || url.href,
+        url: url.href,
+        status,
+        createdAt,
+        updatedAt,
+      };
+
+      const key = normalizeUrlKey(account.url);
+      const previous = byUrl.get(key);
+      if (!previous || account.updatedAt >= previous.updatedAt) byUrl.set(key, account);
+    }
+
+    const result = Array.from(byUrl.values());
+    const uniqueIds = new Set();
+    return result.map((account) => {
+      let id = account.id;
+      while (uniqueIds.has(id)) id = FLM.utils.generateId();
+      uniqueIds.add(id);
+      return { ...account, id };
+    });
+  }
 
   /* ----------------------------------------------------------------------
    * Derived state + rendering
@@ -117,19 +179,32 @@
 
   function recomputeDerived() {
     counts = { all: accounts.length, 'not-followed': 0, followed: 0, skipped: 0 };
-    for (const a of accounts) counts[a.status]++;
+    for (const a of accounts) {
+      if (Object.prototype.hasOwnProperty.call(counts, a.status)) counts[a.status]++;
+    }
 
     let list = accounts;
     if (state.filter !== 'all') list = list.filter((a) => a.status === state.filter);
     if (state.search) {
       const q = state.search;
-      list = list.filter((a) => a.name.toLowerCase().includes(q) || a.url.toLowerCase().includes(q));
+      list = list.filter((a) =>
+        String(a.name || '').toLowerCase().includes(q) ||
+        String(a.url || '').toLowerCase().includes(q)
+      );
     }
     visibleList = list.slice().sort(SORTERS[state.sort] || SORTERS.newest);
+    const totalPages = Math.max(1, Math.ceil(visibleList.length / state.pageSize));
+    if (state.currentPage > totalPages) state.currentPage = totalPages;
+    if (state.currentPage < 1) state.currentPage = 1;
+    const start = (state.currentPage - 1) * state.pageSize;
+    pagedList = visibleList.slice(start, start + state.pageSize);
 
-    // Selection can only ever refer to accounts that still exist.
+    // Selection should only refer to accounts that are currently visible.
+    // This prevents bulk actions from silently affecting accounts hidden by
+    // a filter/search after a status change.
+    const visibleIds = new Set(visibleList.map((a) => a.id));
     for (const id of selection) {
-      if (!accountsById.has(id)) selection.delete(id);
+      if (!accountsById.has(id) || !visibleIds.has(id)) selection.delete(id);
     }
   }
 
@@ -179,7 +254,7 @@
   }
 
   function renderSelectionUi() {
-    const visibleIds = visibleList.map((a) => a.id);
+    const visibleIds = pagedList.map((a) => a.id);
     const selectedVisible = visibleIds.filter((id) => selection.has(id));
     dom.selectAllVisible.checked = visibleIds.length > 0 && selectedVisible.length === visibleIds.length;
     dom.selectAllVisible.indeterminate = selectedVisible.length > 0 && selectedVisible.length < visibleIds.length;
@@ -189,11 +264,23 @@
   }
 
   function renderListMeta() {
-    dom.listHeaderHint.textContent = visibleList.length ? `${formatNumber(visibleList.length)} shown` : '';
+    if (!visibleList.length) {
+      dom.listHeaderHint.textContent = '';
+      dom.pagination.hidden = true;
+      return;
+    }
+    const start = (state.currentPage - 1) * state.pageSize + 1;
+    const end = Math.min(state.currentPage * state.pageSize, visibleList.length);
+    const totalPages = Math.ceil(visibleList.length / state.pageSize);
+    dom.listHeaderHint.textContent = `Showing ${formatNumber(start)}–${formatNumber(end)} of ${formatNumber(visibleList.length)}`;
+    dom.pagination.hidden = totalPages <= 1;
+    dom.pageInfo.textContent = `Page ${state.currentPage} of ${totalPages}`;
+    dom.btnPrevPage.disabled = state.currentPage <= 1;
+    dom.btnNextPage.disabled = state.currentPage >= totalPages;
   }
 
   function renderRow(index, total) {
-    const account = visibleList[index];
+    const account = pagedList[index];
     return render.createRowElement(account, { index, total, selected: selection.has(account.id) });
   }
 
@@ -308,16 +395,38 @@
     if (!account) return;
     const wasAlreadyFollowed = account.status === 'followed';
 
-    const win = window.open(account.url, '_blank', 'noopener,noreferrer');
+    // Open synchronously while this event still has a user-gesture context.
+    // The app's contract is that clicking Open marks the account followed even
+    // when the browser blocks the new tab.
+    let win = null;
+    try {
+      win = window.open(account.url, '_blank');
+      if (win) {
+        try { win.opener = null; } catch (_err) {}
+      }
+    } catch (err) {
+      console.warn('[FLM] Profile window could not be opened:', err);
+    }
+
+    if (!wasAlreadyFollowed) {
+      const saved = await applyStatusChange(
+        [id],
+        'followed',
+        { message: 'Opened profile — marked as followed.' }
+      );
+      if (!saved) return;
+    }
+
     if (!win) {
-      toast.show('Your browser blocked that popup. Allow popups for this page and try again.', { type: 'error' });
-      return;
-    }
-    if (wasAlreadyFollowed) {
+      toast.show(
+        wasAlreadyFollowed
+          ? 'Profile is marked followed, but the browser blocked the new tab.'
+          : 'Marked as followed, but the browser blocked the new tab.',
+        { type: 'warning', duration: 5000 }
+      );
+    } else if (wasAlreadyFollowed) {
       toast.show('Profile opened.', { type: 'info', duration: 2000 });
-      return;
     }
-    await applyStatusChange([id], 'followed', { message: 'Opened profile — marked as followed.' });
   }
 
   async function openNextProfile() {
@@ -340,43 +449,32 @@
     return keys;
   }
 
-  async function handleImportHtmlFile(file) {
+  async function handleImportAnyFile(file) {
     if (!file) return;
     dom.importProgress.hidden = false;
     dom.importProgressText.textContent = `Reading ${file.name}…`;
     await nextPaint();
 
-    let text;
+    let parsed;
     try {
-      text = await readFileAsText(file);
+      parsed = await importer.parseAnyFile(file, existingKeySet());
     } catch (err) {
       dom.importProgress.hidden = true;
-      toast.show("Couldn't read that file.", { type: 'error' });
+      console.error('[FLM] Import failed:', err);
+      toast.show(err.message || `Couldn't import "${file.name}".`, { type: 'error' });
       return;
     }
 
-    dom.importProgressText.textContent = 'Extracting profile links…';
+    dom.importProgressText.textContent = 'Saving profile links…';
     await nextPaint();
-
-    let result;
-    try {
-      result = importer.parseFollowingHtml(text, existingKeySet());
-    } catch (err) {
-      dom.importProgress.hidden = true;
-      toast.show(err.message || "That file couldn't be parsed as HTML.", { type: 'error' });
-      return;
-    }
-
     dom.importProgress.hidden = true;
 
-    if (result.linksFound === 0) {
-      toast.show('No links were found in that file.', { type: 'warning' });
-      return;
-    }
-    if (result.accountsToAdd.length === 0) {
-      toast.show(`No new profile links found. ${formatNumber(result.duplicateCount)} duplicates were ignored.`, {
-        type: 'info',
-      });
+    const result = parsed.result;
+    if (!result || result.accountsToAdd.length === 0) {
+      const bits = ['No new profile links found.'];
+      if (result && result.duplicateCount) bits.push(`${formatNumber(result.duplicateCount)} duplicates were ignored.`);
+      if (result && result.invalidCount) bits.push(`${formatNumber(result.invalidCount)} invalid links were skipped.`);
+      toast.show(bits.join(' '), { type: 'info' });
       return;
     }
 
@@ -392,10 +490,14 @@
       accounts.push(acc);
       accountsById.set(acc.id, acc);
     }
+
+    state.currentPage = 1;
+    selection.clear();
     renderAll();
 
     const parts = [`Imported ${formatNumber(result.accountsToAdd.length)} new profile links.`];
     if (result.duplicateCount > 0) parts.push(`${formatNumber(result.duplicateCount)} duplicates were ignored.`);
+    if (result.invalidCount > 0) parts.push(`${formatNumber(result.invalidCount)} invalid links were skipped.`);
     toast.show(parts.join(' '), { type: 'success' });
   }
 
@@ -558,7 +660,9 @@
 
   function initTheme() {
     const stored = settings.get('theme', null);
-    const theme = stored || (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
+    const validStored = stored === 'dark' || stored === 'light';
+    const systemDark = !!(window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches);
+    const theme = validStored ? stored : (systemDark ? 'dark' : 'light');
     applyTheme(theme);
   }
 
@@ -594,9 +698,11 @@
 
     dom.btnImportHtml.addEventListener('click', () => dom.fileImportHtml.click());
     dom.fileImportHtml.addEventListener('change', async (e) => {
-      const file = e.target.files && e.target.files[0];
+      const files = Array.from(e.target.files || []);
       e.target.value = ''; // allow re-selecting the same file later
-      await handleImportHtmlFile(file);
+      for (const file of files) {
+        await handleImportAnyFile(file);
+      }
     });
     dom.emptyStateAction.addEventListener('click', () => dom.fileImportHtml.click());
 
@@ -615,6 +721,8 @@
       const tab = e.target.closest('[data-filter]');
       if (!tab) return;
       state.filter = tab.dataset.filter;
+      state.currentPage = 1;
+      selection.clear();
       settings.set('filter', state.filter);
       renderAll();
     });
@@ -623,22 +731,40 @@
       'input',
       debounce((e) => {
         state.search = e.target.value.trim().toLowerCase();
+        state.currentPage = 1;
+        selection.clear();
         renderAll();
       }, 120)
     );
 
     dom.sortSelect.value = state.sort;
     dom.sortSelect.addEventListener('change', (e) => {
-      state.sort = e.target.value;
+      state.sort = VALID_SORTS.has(e.target.value) ? e.target.value : 'newest';
+      state.currentPage = 1;
+      selection.clear();
       settings.set('sort', state.sort);
+      renderAll();
+    });
+
+    dom.btnPrevPage.addEventListener('click', () => {
+      if (state.currentPage <= 1) return;
+      state.currentPage -= 1;
+      dom.listViewport.scrollTop = 0;
+      renderAll();
+    });
+    dom.btnNextPage.addEventListener('click', () => {
+      const totalPages = Math.ceil(visibleList.length / state.pageSize);
+      if (state.currentPage >= totalPages) return;
+      state.currentPage += 1;
+      dom.listViewport.scrollTop = 0;
       renderAll();
     });
 
     dom.selectAllVisible.addEventListener('change', (e) => {
       if (e.target.checked) {
-        visibleList.forEach((a) => selection.add(a.id));
+        pagedList.forEach((a) => selection.add(a.id));
       } else {
-        visibleList.forEach((a) => selection.delete(a.id));
+        pagedList.forEach((a) => selection.delete(a.id));
       }
       renderSelectionUi();
       renderList();
@@ -655,8 +781,8 @@
       if (!btn) return;
       const ids = Array.from(selection);
       const newStatus = btn.dataset.bulk;
-      applyStatusChange(ids, newStatus).then(() => {
-        selection.clear();
+      applyStatusChange(ids, newStatus).then((saved) => {
+        if (saved) selection.clear();
         renderSelectionUi();
       });
     });
@@ -697,6 +823,8 @@
       if (e.key === 'Escape' && document.activeElement === dom.searchInput && dom.searchInput.value) {
         dom.searchInput.value = '';
         state.search = '';
+        state.currentPage = 1;
+        selection.clear();
         renderAll();
         return;
       }
@@ -719,10 +847,24 @@
       navigator.clipboard
         .writeText(account.url)
         .then(() => toast.show('Link copied.', { type: 'info', duration: 2000 }))
-        .catch(() => toast.show("Couldn't copy the link.", { type: 'error' }));
+        .catch(() => legacyCopy(account.url));
     } else {
-      toast.show("Copying isn't supported in this browser.", { type: 'warning' });
+      legacyCopy(account.url);
     }
+  }
+
+  function legacyCopy(text) {
+    const area = document.createElement('textarea');
+    area.value = text;
+    area.setAttribute('readonly', '');
+    area.style.position = 'fixed';
+    area.style.opacity = '0';
+    document.body.appendChild(area);
+    area.select();
+    let copied = false;
+    try { copied = document.execCommand('copy'); } catch (_err) { copied = false; }
+    area.remove();
+    toast.show(copied ? 'Link copied.' : "Couldn't copy the link.", { type: copied ? 'info' : 'error', duration: 2000 });
   }
 
   /* ----------------------------------------------------------------------
@@ -738,9 +880,6 @@
       tab.setAttribute('aria-selected', tab.dataset.filter === state.filter ? 'true' : 'false');
     });
 
-    const showLoadingTimer = setTimeout(() => {
-      dom.loadingOverlay.hidden = false;
-    }, 150);
 
     // Storage must never be able to keep the application on the loading screen.
     // db.js already falls back from IndexedDB to localStorage, but this final
@@ -748,8 +887,9 @@
     let storageWarning = '';
     try {
       await db.init();
-      accounts = await db.getAll();
-      if (!Array.isArray(accounts)) accounts = [];
+      const loaded = await db.getAll();
+      accounts = normalizeLoadedAccounts(loaded);
+      accountsById.clear();
       for (const a of accounts) accountsById.set(a.id, a);
 
       if (db.getMode() === 'localStorage') {
@@ -761,8 +901,7 @@
       accountsById.clear();
       storageWarning = "Couldn't load browser storage, so the app started with an empty list. Check your browser's site storage settings.";
     } finally {
-      clearTimeout(showLoadingTimer);
-      dom.loadingOverlay.hidden = true;
+      // Startup must continue even if browser storage is unavailable.
     }
 
     if (storageWarning) {
@@ -774,7 +913,7 @@
       sizer: dom.listSizer,
       rowsContainer: dom.listRows,
       view: state.view,
-      getCount: () => visibleList.length,
+      getCount: () => pagedList.length,
       renderRow,
     });
 
