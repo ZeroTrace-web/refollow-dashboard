@@ -4,6 +4,8 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Follow List Manager</title>
+<link rel="manifest" href="manifest.webmanifest">
+<meta name="theme-color" content="#111827">
 <meta name="description" content="A local, private dashboard for working through an exported list of social-media profiles one by one.">
 <link rel="icon" href="assets/icon.svg" type="image/svg+xml">
 <link rel="stylesheet" href="style.css">
@@ -20,11 +22,16 @@
       <p class="app-header__tagline">Work through your imported follow list, one profile at a time.</p>
     </div>
     <div class="app-header__actions">
+      <button id="btnHistory" class="btn btn--ghost" type="button">History</button>
+      <button id="btnSettings" class="btn btn--ghost" type="button">Settings</button>
+      <button id="btnInstall" class="btn btn--ghost" type="button" hidden>Install</button>
       <button id="btnAbout" class="btn btn--ghost" type="button">Privacy &amp; about</button>
-      <button id="btnViewToggle" class="btn btn--icon" type="button" aria-pressed="false" title="Switch to compact view">
-        <svg viewBox="0 0 20 20" width="18" height="18" aria-hidden="true" focusable="false"><path d="M3 5h14M3 10h14M3 15h14" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" fill="none"/></svg>
-        <span class="visually-hidden">Toggle compact view</span>
-      </button>
+      <div class="view-controls" aria-label="Account display size">
+        <button id="btnViewSmaller" class="btn btn--icon" type="button" title="Smaller account cards" aria-label="Smaller account cards">−</button>
+        <button id="btnViewToggle" class="btn btn--icon" type="button" aria-pressed="false" title="Account card size">Normal</button>
+        <button id="btnViewLarger" class="btn btn--icon" type="button" title="Larger account cards" aria-label="Larger account cards">+</button>
+        <button id="btnFocusList" class="btn btn--icon" type="button" aria-pressed="false" title="Maximize account list" aria-label="Maximize account list">⛶</button>
+      </div>
       <button id="btnTheme" class="btn btn--icon" type="button" aria-pressed="false" title="Switch to dark theme">
         <svg id="iconThemeSun" viewBox="0 0 20 20" width="18" height="18" aria-hidden="true" focusable="false"><circle cx="10" cy="10" r="4" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="M10 1.5v2M10 16.5v2M18.5 10h-2M3.5 10h-2M15.7 4.3l-1.4 1.4M5.7 14.3l-1.4 1.4M15.7 15.7l-1.4-1.4M5.7 5.7 4.3 4.3" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
         <svg id="iconThemeMoon" viewBox="0 0 20 20" width="18" height="18" aria-hidden="true" focusable="false" hidden><path d="M17 12.4A7.5 7.5 0 0 1 7.6 3a7.5 7.5 0 1 0 9.4 9.4Z" fill="currentColor"/></svg>
@@ -40,13 +47,17 @@
         Import files / following list
       </button>
       <input id="fileImportHtml" type="file" accept=".html,.htm,.txt,.csv,.tsv,.md,.markdown,.rtf,.xml,.json,.doc,.docx,.odt,.pdf,.xlsx,.xlsm,.pptx,.epub,text/*,application/*" multiple hidden>
+      <button id="btnTriage" class="btn btn--secondary" type="button" title="Open focused triage mode">Triage mode</button>
+      <button id="btnResume" class="btn btn--secondary" type="button" title="Resume the last opened account" hidden>Resume</button>
       <button id="btnOpenNext" class="btn btn--accent" type="button" title="Open the next not-followed profile">
         <svg viewBox="0 0 20 20" width="16" height="16" aria-hidden="true" focusable="false"><path d="M7 4l6 6-6 6" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" fill="none"/></svg>
         Open next profile
       </button>
     </div>
     <div class="toolbar-primary__group">
-      <button id="btnExport" class="btn btn--secondary" type="button">Export backup</button>
+      <button id="btnExport" class="btn btn--secondary" type="button">JSON backup</button>
+      <button id="btnExportCsv" class="btn btn--secondary" type="button">CSV</button>
+      <button id="btnExportHtml" class="btn btn--secondary" type="button">HTML report</button>
       <button id="btnImportBackup" class="btn btn--secondary" type="button">Restore backup</button>
       <input id="fileImportBackup" type="file" accept=".json,application/json" hidden>
       <button id="btnReset" class="btn btn--danger-ghost" type="button">Reset all data</button>
@@ -106,6 +117,16 @@
           <option value="updated">Recently updated</option>
         </select>
       </label>
+      <label class="sort-field">
+        <span>Tag</span>
+        <select id="tagFilter" aria-label="Filter by tag">
+          <option value="">All tags</option>
+        </select>
+      </label>
+      <div class="layout-switch" role="group" aria-label="List layout">
+        <button id="btnLayoutCards" class="btn btn--small" type="button" aria-pressed="true">Cards</button>
+        <button id="btnLayoutTable" class="btn btn--small" type="button" aria-pressed="false">Table</button>
+      </div>
     </div>
   </section>
 
@@ -115,6 +136,7 @@
       <button data-bulk="followed" class="btn btn--small" type="button">Mark followed</button>
       <button data-bulk="skipped" class="btn btn--small" type="button">Mark skipped</button>
       <button data-bulk="not-followed" class="btn btn--small" type="button">Mark not followed</button>
+      <button id="btnBulkTag" class="btn btn--small" type="button">Add tag</button>
       <button id="btnClearSelection" class="btn btn--small btn--ghost" type="button">Clear selection</button>
     </div>
   </section>
@@ -130,6 +152,15 @@
   <main class="list-viewport" id="listViewport">
     <div class="list-sizer" id="listSizer">
       <div class="list-rows" id="listRows" role="list" aria-label="Imported accounts"></div>
+      <div class="table-wrap" id="tableWrap" hidden>
+        <table class="account-table">
+          <thead><tr>
+            <th scope="col"><span class="visually-hidden">Select</span></th>
+            <th scope="col">Account</th><th scope="col">Status</th><th scope="col">Tags</th><th scope="col">Actions</th>
+          </tr></thead>
+          <tbody id="tableRows"></tbody>
+        </table>
+      </div>
     </div>
     <div class="empty-state" id="emptyState" hidden>
       <svg viewBox="0 0 64 64" width="52" height="52" aria-hidden="true" focusable="false"><path d="M14 20h36M14 32h36M14 44h20" stroke="currentColor" stroke-width="3" stroke-linecap="round"/></svg>
@@ -156,6 +187,28 @@
 
 <div class="toast-region" id="toastRegion" aria-live="polite" aria-atomic="false"></div>
 
+
+<div class="modal-backdrop" id="triageBackdrop" hidden>
+  <div class="modal triage-modal" role="dialog" aria-modal="true" aria-labelledby="triageTitle" id="triageModal" tabindex="-1">
+    <div class="triage-modal__eyebrow">Focused workflow</div>
+    <h2 id="triageTitle">Triage mode</h2>
+    <p id="triageCounter" class="triage-modal__counter"></p>
+    <div class="triage-account" id="triageAccount">
+      <strong id="triageName"></strong>
+      <a id="triageUrl" target="_blank" rel="noopener noreferrer"></a>
+      <span id="triageStatus" class="account-row__badge"></span>
+    </div>
+    <div class="triage-actions">
+      <button id="triageOpen" class="btn btn--primary" type="button">Open Profile</button>
+      <button id="triageFollow" class="btn btn--accent" type="button">Mark Followed</button>
+      <button id="triageSkip" class="btn btn--secondary" type="button">Skip</button>
+      <button id="triagePrev" class="btn btn--ghost" type="button">Previous</button>
+      <button id="triageNext" class="btn btn--ghost" type="button">Next</button>
+      <button id="triageClose" class="btn btn--ghost" type="button">Close</button>
+    </div>
+  </div>
+</div>
+
 <div class="modal-backdrop" id="modalBackdrop" hidden>
   <div class="modal" role="dialog" aria-modal="true" aria-labelledby="modalTitle" id="modal" tabindex="-1">
     <h2 id="modalTitle"></h2>
@@ -163,6 +216,16 @@
     <div class="modal__actions" id="modalActions"></div>
   </div>
 </div>
+
+
+<template id="historyTemplate">
+  <div class="history-item">
+    <div class="history-item__main">
+      <strong class="history-item__title"></strong>
+      <span class="history-item__meta"></span>
+    </div>
+  </div>
+</template>
 
 <template id="rowTemplate">
   <div class="account-row" role="listitem">
@@ -175,8 +238,23 @@
       <p class="account-row__url"></p>
     </div>
     <span class="account-row__badge"></span>
+    <div class="account-row__tags" aria-label="Tags"></div>
     <div class="account-row__actions"></div>
   </div>
+</template>
+
+
+<template id="tableRowTemplate">
+  <tr class="account-table__row">
+    <td><input type="checkbox" class="account-table__checkbox"></td>
+    <td>
+      <div class="account-table__name"></div>
+      <a class="account-table__url" target="_blank" rel="noopener noreferrer"></a>
+    </td>
+    <td><span class="account-table__status"></span></td>
+    <td><div class="account-table__tags"></div></td>
+    <td><div class="account-table__actions"></div></td>
+  </tr>
 </template>
 
 <script src="js/utils.js"></script>
@@ -185,5 +263,6 @@
 <script src="js/toast.js"></script>
 <script src="js/render.js"></script>
 <script src="js/app.js"></script>
+<script>if("serviceWorker" in navigator){window.addEventListener("load",()=>navigator.serviceWorker.register("sw.js").catch(()=>{}));}</script>
 </body>
 </html>

@@ -24,7 +24,7 @@ follow-list-manager/
     ├── db.js             IndexedDB storage (with a localStorage fallback)
     ├── importer.js       Parses the imported HTML/JSON files
     ├── toast.js           Toast notifications
-    ├── render.js          Row rendering + virtual scrolling
+    ├── render.js          Card/table row rendering + pagination
     └── app.js             Application state and all the wiring
 ```
 
@@ -258,3 +258,55 @@ All parsing happens in the browser. Files are not uploaded. For document formats
 ### Import safety and compatibility
 
 Imports are processed entirely in the browser. Files larger than 100 MB are rejected to prevent accidental browser freezes. The importer uses format-specific parsing where practical and falls back to literal URL recovery for difficult or legacy document formats.
+
+
+## Productivity features
+
+### Card and table views
+
+Use **Cards** for the comfortable dashboard view or **Table** for dense, spreadsheet-style processing. The chosen layout is remembered locally.
+
+### Tags
+
+Each account can have up to 20 short tags. Use **Tags** on an account to edit them, or select several accounts and use **Add tag** for bulk tagging. The Tag dropdown filters the current list.
+
+### Portable exports
+
+Besides the full JSON backup, the app can export:
+
+- **CSV** for spreadsheets and data analysis.
+- **HTML report** for a portable, human-readable report.
+
+### Import history
+
+The **History** button records recent imports/restores with the source filename, number added, duplicate/invalid counts, and total account count afterward. History is local.
+
+### Keyboard workflow
+
+- `/` focuses search.
+- `Esc` clears search when the search field is focused.
+- `N` opens the next not-followed account.
+- `P` goes to the previous page.
+- `J` goes to the next page.
+
+### Installable app
+
+When served from HTTPS, supported browsers can install the app as a PWA from the **Install** button when the browser offers it. A small service worker caches the app shell so the interface can reopen quickly and can continue to load when the network is temporarily unavailable.
+
+## Current file formats
+
+The main importer accepts multiple files at once, including HTML/HTM/XHTML, TXT, CSV/TSV, Markdown, RTF, XML, JSON, DOC/DOCX, ODT, PDF, XLSX/XLSM, PPTX and EPUB. Extraction is best-effort for formats whose embedded links are not exposed as simple text.
+
+
+## Recent workflow features
+
+- **Triage mode** gives you a focused, one-account-at-a-time workflow for not-followed profiles.
+- **Resume** reopens the last profile you worked with.
+- **Import history** records recent imports/restores locally and can compare the sets of URLs newly added by the two most recent imports.
+- The app still supports cards/table views, tags, CSV/HTML/JSON exports, pagination, keyboard shortcuts, PWA installation, and the configurable Open Profile auto-follow behavior.
+
+The comparison in History is based on URLs added by the import events, not a full historical snapshot of every account in the source file.
+
+
+## Service worker updates
+The service worker uses a network-first strategy for same-origin assets so new Vercel deployments are not unnecessarily trapped behind stale JavaScript/CSS. It falls back to the cached application shell when offline.
