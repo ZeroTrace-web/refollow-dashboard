@@ -89,8 +89,15 @@
     btnViewSmaller: $('btnViewSmaller'),
     btnViewLarger: $('btnViewLarger'),
     btnFocusList: $('btnFocusList'),
+    btnExitFocusList: $('btnExitFocusList'),
     btnTheme: $('btnTheme'),
     iconThemeSun: $('iconThemeSun'),
+    btnCommand: $('btnCommand'),
+    commandBackdrop: $('commandBackdrop'),
+    commandPalette: $('commandPalette'),
+    btnCloseCommand: $('btnCloseCommand'),
+    commandInput: $('commandInput'),
+    commandList: $('commandList'),
     iconThemeMoon: $('iconThemeMoon'),
 
     btnImportHtml: $('btnImportHtml'),
@@ -172,8 +179,8 @@
       const status = VALID_FILTERS.has(raw.status) && raw.status !== 'all'
         ? raw.status
         : 'not-followed';
-      const createdAt = Number.isFinite(raw.createdAt) ? raw.createdAt : now;
-      const updatedAt = Number.isFinite(raw.updatedAt) ? raw.updatedAt : createdAt;
+      const createdAt = normalizeTimestamp(raw.createdAt, now);
+      const updatedAt = normalizeTimestamp(raw.updatedAt, createdAt);
       const id = String(raw.id || '').trim() || FLM.utils.generateId();
 
       const account = {
@@ -543,21 +550,24 @@
     await nextPaint();
 
     const result = parsed.result;
-    if (!result || result.accountsToAdd.length === 0) {
-      const bits = ['No new profile links found.'];
-      if (result && result.duplicateCount) bits.push(`${formatNumber(result.duplicateCount)} duplicates were ignored.`);
-      if (result && result.invalidCount) bits.push(`${formatNumber(result.invalidCount)} invalid links were skipped.`);
-      toast.show(bits.join(' '), { type: 'info' });
-      return;
-    }
-
     try {
-      await db.putMany(result.accountsToAdd);
-    } catch (err) {
-      console.error('[FLM] Failed to save imported accounts:', err);
-      toast.show("Couldn't save the imported accounts — your browser storage may be full.", { type: 'error' });
-      return;
+      if (!result || !Array.isArray(result.accountsToAdd) || result.accountsToAdd.length === 0) {
+        const bits = ['No new profile links found.'];
+        if (result && result.duplicateCount) bits.push(`${formatNumber(result.duplicateCount)} duplicates were ignored.`);
+        if (result && result.invalidCount) bits.push(`${formatNumber(result.invalidCount)} invalid links were skipped.`);
+        toast.show(bits.join(' '), { type: 'info' });
+        return;
+      }
+
+      try {
+        await db.putMany(result.accountsToAdd);
+      } catch (err) {
+        console.error('[FLM] Failed to save imported accounts:', err);
+        toast.show("Couldn't save the imported accounts — your browser storage may be full.", { type: 'error' });
+        return;
+      }
     } finally {
+      // Every import path, including "no new links", must clear the progress indicator.
       dom.importProgress.hidden = true;
     }
 
@@ -882,14 +892,16 @@
     setView(order[index]);
   }
 
-  function toggleFocusList() {
-    state.focusList = !state.focusList;
+  function toggleFocusList(force) {
+    const next = typeof force === 'boolean' ? force : !state.focusList;
+    state.focusList = next;
     document.body.classList.toggle('focus-list', state.focusList);
     dom.btnFocusList.setAttribute('aria-pressed', state.focusList ? 'true' : 'false');
     dom.btnFocusList.title = state.focusList ? 'Exit maximize account list' : 'Maximize account list';
+    if (dom.btnExitFocusList) dom.btnExitFocusList.hidden = !state.focusList;
     if (state.focusList) {
       try { dom.listViewport.focus({ preventScroll: true }); }
-      catch (_err) { dom.btnFocusList.focus(); }
+      catch (_err) { if (dom.btnExitFocusList) dom.btnExitFocusList.focus(); }
     }
   }
 
@@ -1120,6 +1132,83 @@
   }
 
   /* ----------------------------------------------------------------------
+   * Command palette
+   * -------------------------------------------------------------------- */
+
+  const COMMANDS = [
+    { id: 'import', icon: '↥', title: 'Import files', hint: 'Add profile links from HTML, TXT, CSV and other supported files.', key: 'I', run: () => dom.fileImportHtml.click() },
+    { id: 'next', icon: '→', title: 'Open next profile', hint: 'Open the next Not Followed profile.', key: 'N', run: openNextProfile },
+    { id: 'triage', icon: '◇', title: 'Open Triage mode', hint: 'Work through accounts one by one.', key: 'T', run: openTriage },
+    { id: 'resume', icon: '↺', title: 'Resume last account', hint: 'Jump back to the last opened profile.', key: 'R', run: resumeLastOpened },
+    { id: 'theme', icon: '◐', title: 'Toggle theme', hint: 'Switch between light and dark appearance.', key: '', run: toggleTheme },
+    { id: 'layout', icon: '▦', title: 'Toggle list layout', hint: 'Switch between Cards and Table.', key: '', run: () => setLayout(state.layout === 'cards' ? 'table' : 'cards') },
+    { id: 'focus', icon: '⛶', title: 'Toggle focus mode', hint: 'Maximize the account list.', key: '', run: () => toggleFocusList() },
+    { id: 'settings', icon: '⚙', title: 'Open settings', hint: 'Configure account-opening behavior.', key: '', run: openSettingsModal },
+    { id: 'export', icon: '↓', title: 'Export JSON backup', hint: 'Save a portable backup of your local data.', key: 'E', run: handleExport },
+  ];
+  let commandFiltered = COMMANDS.slice();
+  let commandIndex = 0;
+
+  function renderCommandList() {
+    const q = String(dom.commandInput.value || '').trim().toLowerCase();
+    commandFiltered = COMMANDS.filter((c) =>
+      `${c.title} ${c.hint}`.toLowerCase().includes(q)
+    );
+    if (commandIndex >= commandFiltered.length) commandIndex = Math.max(0, commandFiltered.length - 1);
+    dom.commandList.replaceChildren();
+    commandFiltered.forEach((cmd, i) => {
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = `command-item${i === commandIndex ? ' is-active' : ''}`;
+      btn.dataset.commandId = cmd.id;
+      btn.setAttribute('role', 'option');
+      btn.setAttribute('aria-selected', i === commandIndex ? 'true' : 'false');
+      const icon = document.createElement('span');
+      icon.className = 'command-item__icon';
+      icon.textContent = cmd.icon;
+      const text = document.createElement('span');
+      const title = document.createElement('span');
+      title.className = 'command-item__title';
+      title.textContent = cmd.title;
+      const hint = document.createElement('span');
+      hint.className = 'command-item__hint';
+      hint.textContent = cmd.hint;
+      text.append(title, hint);
+      btn.append(icon, text);
+      if (cmd.key) {
+        const key = document.createElement('kbd');
+        key.textContent = cmd.key;
+        btn.appendChild(key);
+      } else {
+        btn.appendChild(document.createElement('span'));
+      }
+      dom.commandList.appendChild(btn);
+    });
+  }
+
+  function openCommandPalette() {
+    dom.commandBackdrop.hidden = false;
+    dom.commandInput.value = '';
+    commandIndex = 0;
+    renderCommandList();
+    setTimeout(() => dom.commandInput.focus(), 0);
+  }
+
+  function closeCommandPalette() {
+    dom.commandBackdrop.hidden = true;
+  }
+
+  function runSelectedCommand() {
+    const cmd = commandFiltered[commandIndex];
+    if (!cmd) return;
+    closeCommandPalette();
+    try { cmd.run(); } catch (err) {
+      console.error('[FLM] Command failed:', err);
+      toast.show("Couldn't run that action.", { type: 'error' });
+    }
+  }
+
+  /* ----------------------------------------------------------------------
    * Event wiring
    * -------------------------------------------------------------------- */
 
@@ -1147,11 +1236,24 @@
     dom.btnHistory.addEventListener('click', openHistoryModal);
     dom.btnSettings.addEventListener('click', openSettingsModal);
     dom.btnAboutInline.addEventListener('click', openAboutModal);
+    dom.btnCommand.addEventListener('click', openCommandPalette);
+    dom.btnCloseCommand.addEventListener('click', closeCommandPalette);
+    dom.commandBackdrop.addEventListener('click', (e) => {
+      if (e.target === dom.commandBackdrop) closeCommandPalette();
+    });
+    dom.commandInput.addEventListener('input', () => { commandIndex = 0; renderCommandList(); });
+    dom.commandList.addEventListener('click', (e) => {
+      const btn = e.target.closest('[data-command-id]');
+      if (!btn) return;
+      commandIndex = commandFiltered.findIndex((c) => c.id === btn.dataset.commandId);
+      runSelectedCommand();
+    });
     dom.btnTheme.addEventListener('click', toggleTheme);
     dom.btnViewToggle.addEventListener('click', toggleView);
     dom.btnViewSmaller.addEventListener('click', () => changeView(-1));
     dom.btnViewLarger.addEventListener('click', () => changeView(1));
     dom.btnFocusList.addEventListener('click', toggleFocusList);
+    if (dom.btnExitFocusList) dom.btnExitFocusList.addEventListener('click', () => toggleFocusList(false));
     dom.btnLayoutCards.addEventListener('click', () => setLayout('cards'));
     dom.btnLayoutTable.addEventListener('click', () => setLayout('table'));
     dom.tagFilter.addEventListener('change', (e) => {
@@ -1318,6 +1420,26 @@
     window.addEventListener('keydown', (e) => {
       const tag = (document.activeElement && document.activeElement.tagName) || '';
       const typing = tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT';
+
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') {
+        e.preventDefault();
+        if (dom.commandBackdrop.hidden) openCommandPalette(); else closeCommandPalette();
+        return;
+      }
+
+      if (!dom.commandBackdrop.hidden) {
+        if (e.key === 'Escape') { e.preventDefault(); closeCommandPalette(); return; }
+        if (e.key === 'ArrowDown') { e.preventDefault(); commandIndex = Math.min(commandIndex + 1, Math.max(0, commandFiltered.length - 1)); renderCommandList(); return; }
+        if (e.key === 'ArrowUp') { e.preventDefault(); commandIndex = Math.max(commandIndex - 1, 0); renderCommandList(); return; }
+        if (e.key === 'Enter') { e.preventDefault(); runSelectedCommand(); return; }
+        return;
+      }
+
+      if (state.focusList && e.key === 'Escape') {
+        e.preventDefault();
+        toggleFocusList(false);
+        return;
+      }
 
       if (state.triageOpen) {
         if (e.key === 'Escape') { closeTriage(); return; }

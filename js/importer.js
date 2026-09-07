@@ -10,7 +10,7 @@
 
   const FLM = (window.FLM = window.FLM || {});
   const {
-    parseHttpUrl, normalizeUrlKey, deriveNameFromUrl, sanitizeName, generateId,
+    parseHttpUrl, normalizeUrlKey, deriveNameFromUrl, sanitizeName, generateId, normalizeTimestamp,
   } = FLM.utils;
 
   const VALID_STATUSES = new Set(['not-followed', 'followed', 'skipped']);
@@ -246,8 +246,8 @@
         url: url.href,
         status: VALID_STATUSES.has(entry.status) ? entry.status : 'not-followed',
         tags: Array.isArray(entry.tags) ? [...new Set(entry.tags.map((t) => sanitizeName(t).replace(/^#/, '')).filter(Boolean).slice(0, 20))] : [],
-        createdAt: Number.isFinite(entry.createdAt) ? entry.createdAt : now + accountsToAdd.length,
-        updatedAt: Number.isFinite(entry.updatedAt) ? entry.updatedAt : now + accountsToAdd.length,
+        createdAt: normalizeTimestamp(entry.createdAt, now + accountsToAdd.length),
+        updatedAt: normalizeTimestamp(entry.updatedAt, now + accountsToAdd.length),
       });
     }
 

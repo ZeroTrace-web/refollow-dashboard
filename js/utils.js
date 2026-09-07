@@ -143,6 +143,13 @@
     });
   }
 
+  /** Keep persisted timestamps finite and within JavaScript Date's valid range. */
+  function normalizeTimestamp(value, fallback = Date.now()) {
+    const n = Number(value);
+    if (!Number.isFinite(n) || n < 0 || n > 8.64e15) return fallback;
+    return n;
+  }
+
   /* ---------------------------------------------------------------------
    * Misc
    * ------------------------------------------------------------------- */
@@ -198,6 +205,7 @@
     formatNumber,
     formatDateForFilename,
     formatRelativeOrDate,
+    normalizeTimestamp,
     debounce,
     clamp,
     readFileAsText,
