@@ -1,1 +1,63 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-labelledby="title desc">
+  <title id="title">Refollow app icon</title>
+  <desc id="desc">Two user silhouettes surrounded by a circular follow-again arrow</desc>
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#21105e"/>
+      <stop offset="55%" stop-color="#100b2f"/>
+      <stop offset="100%" stop-color="#070713"/>
+    </linearGradient>
+    <linearGradient id="ring" x1="120" y1="90" x2="420" y2="400" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#6c2cf5"/>
+      <stop offset="55%" stop-color="#b02df0"/>
+      <stop offset="100%" stop-color="#ff63c8"/>
+    </linearGradient>
+    <linearGradient id="person" x1="150" y1="140" x2="340" y2="360" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#ffffff"/>
+      <stop offset="100%" stop-color="#c7bcff"/>
+    </linearGradient>
+    <filter id="glow" x="-30%" y="-30%" width="160%" height="160%">
+      <feGaussianBlur stdDeviation="9" result="blur"/>
+      <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+  </defs>
 
+  <rect x="16" y="16" width="480" height="480" rx="108" fill="url(#bg)"/>
+
+  <!-- subtle ambient glow -->
+  <circle cx="160" cy="85" r="120" fill="#5a22e8" opacity=".18" filter="url(#glow)"/>
+
+  <!-- circular refollow arrow -->
+  <path d="M125 284
+           C92 208 128 119 207 92
+           C286 64 374 103 405 180
+           C414 202 418 226 415 248"
+        fill="none" stroke="url(#ring)" stroke-width="28"
+        stroke-linecap="round"/>
+  <path d="M415 248 L369 247 L410 290 L454 247 Z" fill="url(#ring)"/>
+  <path d="M390 306
+           C365 374 292 416 219 394
+           C169 379 132 343 116 296"
+        fill="none" stroke="url(#ring)" stroke-width="28"
+        stroke-linecap="round"/>
+
+  <!-- rear user -->
+  <circle cx="287" cy="195" r="48" fill="#7e5ce8" opacity=".9"/>
+  <path d="M236 286 C240 245 267 224 305 224
+           C348 224 377 251 379 289
+           C365 315 332 332 292 332
+           C267 332 247 318 236 286Z"
+        fill="#5b42bf" opacity=".9"/>
+
+  <!-- front user -->
+  <circle cx="218" cy="187" r="58" fill="url(#person)"/>
+  <path d="M121 302
+           C124 254 162 230 214 230
+           C265 230 302 254 306 301
+           C309 339 272 362 214 362
+           C157 362 117 339 121 302Z"
+        fill="url(#person)"/>
+
+  <!-- tiny highlight -->
+  <circle cx="386" cy="114" r="5" fill="#f7b8ff" opacity=".85"/>
+</svg>
