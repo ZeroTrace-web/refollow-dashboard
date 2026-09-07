@@ -742,18 +742,31 @@
       dom.loadingOverlay.hidden = false;
     }, 150);
 
-    await db.init();
-    accounts = await db.getAll();
-    for (const a of accounts) accountsById.set(a.id, a);
+    // Storage must never be able to keep the application on the loading screen.
+    // db.js already falls back from IndexedDB to localStorage, but this final
+    // guard also protects against unexpected browser/storage failures.
+    let storageWarning = '';
+    try {
+      await db.init();
+      accounts = await db.getAll();
+      if (!Array.isArray(accounts)) accounts = [];
+      for (const a of accounts) accountsById.set(a.id, a);
 
-    clearTimeout(showLoadingTimer);
-    dom.loadingOverlay.hidden = true;
+      if (db.getMode() === 'localStorage') {
+        storageWarning = 'Using local storage for saving because IndexedDB is unavailable or did not respond. Large lists may be a little slower.';
+      }
+    } catch (err) {
+      console.error('[FLM] Failed to load saved accounts:', err);
+      accounts = [];
+      accountsById.clear();
+      storageWarning = "Couldn't load browser storage, so the app started with an empty list. Check your browser's site storage settings.";
+    } finally {
+      clearTimeout(showLoadingTimer);
+      dom.loadingOverlay.hidden = true;
+    }
 
-    if (db.getMode() === 'localStorage') {
-      toast.show('Using local storage for saving (IndexedDB is unavailable here). Large lists may be a little slower.', {
-        type: 'warning',
-        duration: 7000,
-      });
+    if (storageWarning) {
+      toast.show(storageWarning, { type: 'warning', duration: 8000 });
     }
 
     virtualList = new render.VirtualList({
